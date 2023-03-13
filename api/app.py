@@ -5,6 +5,8 @@ from fastapi import FastAPI, HTTPException
 from datetime import datetime
 import motor.motor_asyncio
 import pydantic
+import requests
+import pytz
 
 app = FastAPI()
 
@@ -29,49 +31,36 @@ client = motor.motor_asyncio.AsyncIOMotorClient("mongodb+srv://week4:oKbzC9wuJa6
 
 db = client.sunset
 
-@app.get("/api/sunset")
-async def root():
-  return {
-    "sunset": "2023-03-10T15:27:00:000000"
-  }
+@app.get("/api/state")
+async def getapistate():
+  state=await db["api"].find_one({"jah": "kno"})
 
-@app.get("/profile")
-async def get_all_profiles():
-    mulprofiles = await db["profile"].find().to_list(999)
-    if len(mulprofiles) == 0:
-        return "No profile present"
-    return mulprofiles[0]
-
-@app.post("/profile",status_code=201)
-async def create_new_profile(request: Request):
-    profile_obj = await request.json()
-    profile_obj["last_updated"]=datetime.now()
-
-    new_profile = await db["profile"].insert_one(profile_obj)
-    created_profile = await db["profile"].find_one({"_id": new_profile.inserted_id})
-    return created_profile
-
-@app.get("/data",status_code=201)
-async def get_all_data():
-    tank_data = await db["data"].find().to_list(999)
-    return tank_data
-
-@app.get("/data/{id}")
-async def get_one_tank(id: str):
-    tank_one = await db["data"].find_one({"_id": ObjectId(id)})
-    return tank_one
-
-@app.post("/data",status_code=201)
-async def create_new_tank(request: Request):
-    tank_obj = await request.json()
-
-    new_tank = await db["data"].insert_one(tank_obj)
-    created_tank = await db["data"].find_one({"_id": new_tank.inserted_id})
-    return created_tank
+  if state is not None:
+    
+     return state
+  if state is None:
+    return {"fan":False, "light": False}
+  return state
 
 
+@app.put("/api/state",status_code=204)
+async def putstate(request: Request):
+    ps= await request.json()
+    sunset = requests.get('https://ecse-sunset-api.onrender.com/api/sunset').json()
 
+    ##profile_obj["last_updated"]=datetime.now()
+    sunset_time = datetime.strptime(sunset['sunset'], '%Y-%m-%dT%H:%M:%S.%f').time()
+    ct_object1 = datetime.now(pytz.timezone('Jamaica')).time()
+    dt_object1 = datetime.strptime(str(sunset_time), "%d/%m/%Y %H:%M:%S")
+    dt_object2 = datetime.strptime(str(ct_object1), "%d/%m/%Y %H:%M:%S")
 
-@app.put("/api/sunset",status_code=204)
-async def rootput():
-  
+    ps["light"] = (dt_object2>dt_object1)
+    ps["fan"] = (float(ps["temperature"]) >= 28.0) 
+
+    check = await db["api"].find_one({"jah": "kno"})
+    if check is not None:
+      await db["api"].update_one(({"jah": "kno"}), {"$set": ps})
+      check = await db["api"].find_one({"jah": "kno"})
+    else:
+     await db["api"].insert_one({**ps, "jah": "kno"})
+     check = await db["api"].find_one({"jah": "kno"})
